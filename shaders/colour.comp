@@ -2,10 +2,14 @@
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
+struct MiscData{
+    vec3 sun_pos;
+};
+
 uniform layout(set = 0, binding = 0, rgba8)  writeonly image2D out_img;
 uniform layout(set = 0, binding = 1, r8) readonly image2D in_img;
 layout(set=0, binding=2) buffer Data{
-    vec3 sun_pos;
+    MiscData miscData;
 };
 
 // sink everything to the edges
@@ -49,18 +53,15 @@ void main() {
     ivec2 tex_pos = ivec2(gl_GlobalInvocationID.xy);
     float val = imageLoad(in_img, tex_pos).x;
 
-    // add central focus
-    //val = val*distance_scale(gl_GlobalInvocationID.x) *distance_scale(gl_GlobalInvocationID.y);
-
     // colourise
     vec3 color = colourise(val);
 
     // shade
     vec3 pos = tex_to_world(tex_pos, val);
-    vec3 ray_dir = normalize(sun_pos - pos);
+    vec3 ray_dir = normalize(miscData.sun_pos - pos);
     vec3 check_pos = pos;
     //search
-    for (int i = 0; i < distance(sun_pos, pos); i++) {
+    for (int i = 0; i < distance(miscData.sun_pos, pos); i++) {
         check_pos += ray_dir;
         float h = imageLoad(in_img, world_to_tex(check_pos)).x;
         if(h>check_pos.z){
@@ -68,8 +69,6 @@ void main() {
             break;
         }
     }
-
-
 
     // write to texture
     vec4 to_write = vec4(color, 1.0);
