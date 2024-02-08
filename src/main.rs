@@ -9,9 +9,11 @@ use noise::{Fbm, Perlin};
 use std::default::Default;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+use vulkano::buffer::BufferContents;
 use vulkano::command_buffer::{CopyBufferToImageInfo, CopyImageToBufferInfo};
+use vulkano::device::{Device, Queue};
 use vulkano::format::Format;
-use vulkano::image::{view::ImageView, ImageUsage};
+use vulkano::image::{view::ImageView, Image, ImageUsage};
 use vulkano::{
     buffer::{Buffer, BufferCreateInfo, BufferUsage},
     command_buffer::{
@@ -23,30 +25,102 @@ use vulkano::{
     memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator},
     pipeline::{Pipeline, PipelineBindPoint},
 };
-use vulkano::buffer::BufferContents;
 
 #[repr(C)]
-#[derive(Clone,Copy,BufferContents)]
+#[derive(Clone, Copy, BufferContents)]
 struct ProgramData {
-    sun_pos: [f32; 3]
+    sun_pos: [f32; 3],
 }
 
 const IMAGE_WIDTH: u32 = 1024;
 const IMAGE_HEIGHT: u32 = 1024;
+
+fn setup(
+    device: Arc<Device>,
+    queue: Arc<Queue>,
+    noise_image: Arc<Image>,
+    noise_image_view: Arc<ImageView>,
+    memory_allocator: Arc<StandardMemoryAllocator>,
+    descriptor_allocator: &StandardDescriptorSetAllocator,
+    command_buffer_allocator: &StandardCommandBufferAllocator,
+) {
+    // init noise generation
+    let seed = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+    let fbm = Fbm::<Perlin>::new(seed.as_secs() as u32);
+    let noise_map = PlaneMapBuilder::<_, 2>::new(&fbm)
+        .set_size(IMAGE_WIDTH as usize, IMAGE_HEIGHT as usize)
+        .set_x_bounds(-5.0, 5.0)
+        .set_y_bounds(-5.0, 5.0)
+        .build();
+
+    // noise buffer
+    let in_buff = Buffer::from_iter(
+        memory_allocator.clone(),
+        BufferCreateInfo {
+            usage: BufferUsage::TRANSFER_SRC,
+            ..Default::default()
+        },
+        AllocationCreateInfo {
+            memory_type_filter: MemoryTypeFilter::PREFER_DEVICE
+                | MemoryTypeFilter::HOST_RANDOM_ACCESS,
+            ..Default::default()
+        },
+        noise_map.iter().map(|x| ((x + 1.0) * 0.5 * 255.0) as u8),
+    )
+    .unwrap();
+
+    //setup pipeline
+    let setup_shader = process_shader::load(device.clone()).unwrap();
+    let setup_pipeline = make_compute_pipeline(setup_shader, device.clone());
+
+    // setup descriptor sets
+    let setup_layout = setup_pipeline.layout().set_layouts().first().unwrap();
+    let setup_set = PersistentDescriptorSet::new(
+        descriptor_allocator,
+        setup_layout.clone(),
+        [WriteDescriptorSet::image_view(0, noise_image_view.clone())],
+        [],
+    )
+    .unwrap();
+
+    // make command buffer
+    let mut setup_builder = AutoCommandBufferBuilder::primary(
+        command_buffer_allocator,
+        queue.queue_family_index(),
+        CommandBufferUsage::OneTimeSubmit,
+    )
+    .unwrap();
+
+    setup_builder
+        .bind_pipeline_compute(setup_pipeline.clone())
+        .unwrap()
+        .copy_buffer_to_image(CopyBufferToImageInfo::buffer_image(
+            in_buff.clone(),
+            noise_image.clone(),
+        ))
+        .unwrap()
+        .bind_descriptor_sets(
+            PipelineBindPoint::Compute,
+            setup_pipeline.layout().clone(),
+            0,
+            setup_set,
+        )
+        .unwrap()
+        .dispatch([IMAGE_WIDTH / 8, IMAGE_HEIGHT / 8, 1])
+        .unwrap();
+
+    let setup_command_buffer = setup_builder.build().unwrap();
+
+    // perform setup
+    execute_buffer(setup_command_buffer, queue, device);
+}
 
 fn main() {
     println!("Setting up vulkan");
     // Initialize vulkan
     let (device, queue) = get_vulkan_device();
 
-    // Create the compute pipelines
-    let render_shader = colour_shader::load(device.clone()).unwrap();
-    let render_pipeline = make_compute_pipeline(render_shader, device.clone());
-
-    let setup_shader = process_shader::load(device.clone()).unwrap();
-    let setup_pipeline = make_compute_pipeline(setup_shader, device.clone());
-
-    // Prepare memory
+    // Prepare memory allocators
     let memory_allocator = Arc::new(StandardMemoryAllocator::new_default(device.clone()));
     let descriptor_set_allocator =
         StandardDescriptorSetAllocator::new(device.clone(), Default::default());
@@ -54,8 +128,8 @@ fn main() {
         StandardCommandBufferAllocator::new(device.clone(), Default::default());
 
     // Create buffers
-    let mut program_data = ProgramData{
-        sun_pos: [-500.0f32, -500.0f32, 0.0f32]
+    let mut program_data = ProgramData {
+        sun_pos: [-500.0f32, -500.0f32, 0.0f32],
     };
     let misc_buffer = Buffer::from_data(
         memory_allocator.clone(),
@@ -69,30 +143,6 @@ fn main() {
             ..Default::default()
         },
         program_data,
-    )
-    .unwrap();
-
-    // init noise generation
-    let seed = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
-    let fbm = Fbm::<Perlin>::new(seed.as_secs() as u32);
-    let noise_map = PlaneMapBuilder::<_, 2>::new(&fbm)
-        .set_size(IMAGE_WIDTH as usize, IMAGE_HEIGHT as usize)
-        .set_x_bounds(-5.0, 5.0)
-        .set_y_bounds(-5.0, 5.0)
-        .build();
-    // create input buffer
-    let in_buff = Buffer::from_iter(
-        memory_allocator.clone(),
-        BufferCreateInfo {
-            usage: BufferUsage::TRANSFER_SRC,
-            ..Default::default()
-        },
-        AllocationCreateInfo {
-            memory_type_filter: MemoryTypeFilter::PREFER_DEVICE
-                | MemoryTypeFilter::HOST_RANDOM_ACCESS,
-            ..Default::default()
-        },
-        noise_map.iter().map(|x| ((x + 1.0) * 0.5 * 255.0) as u8),
     )
     .unwrap();
 
@@ -128,6 +178,10 @@ fn main() {
     );
     let out_image_view = ImageView::new_default(out_image.clone()).unwrap();
 
+    // Create the compute pipeline
+    let render_shader = colour_shader::load(device.clone()).unwrap();
+    let render_pipeline = make_compute_pipeline(render_shader, device.clone());
+
     // create descriptor set
     let layout = render_pipeline.layout().set_layouts().first().unwrap();
     let set = PersistentDescriptorSet::new(
@@ -141,44 +195,6 @@ fn main() {
         [],
     )
     .unwrap();
-
-    let setup_layout = setup_pipeline.layout().set_layouts().first().unwrap();
-    let setup_set = PersistentDescriptorSet::new(
-        &descriptor_set_allocator,
-        setup_layout.clone(),
-        [WriteDescriptorSet::image_view(0, in_image_view.clone())],
-        [],
-    )
-    .unwrap();
-
-    // crete output buffer
-
-    let mut setup_builder = AutoCommandBufferBuilder::primary(
-        &command_buffer_allocator,
-        queue.queue_family_index(),
-        CommandBufferUsage::OneTimeSubmit,
-    )
-    .unwrap();
-
-    setup_builder
-        .bind_pipeline_compute(setup_pipeline.clone())
-        .unwrap()
-        .copy_buffer_to_image(CopyBufferToImageInfo::buffer_image(
-            in_buff.clone(),
-            in_image.clone(),
-        ))
-        .unwrap()
-        .bind_descriptor_sets(
-            PipelineBindPoint::Compute,
-            setup_pipeline.layout().clone(),
-            0,
-            setup_set,
-        )
-        .unwrap()
-        .dispatch([IMAGE_WIDTH / 8, IMAGE_HEIGHT / 8, 1])
-        .unwrap();
-
-    let setup_command_buffer = setup_builder.build().unwrap();
 
     // In order to execute our operation, we have to build a command buffer.
     let mut builder = AutoCommandBufferBuilder::primary(
@@ -197,7 +213,7 @@ fn main() {
             set,
         )
         .unwrap()
-        .dispatch([IMAGE_WIDTH / 8, IMAGE_HEIGHT/ 8, 1])
+        .dispatch([IMAGE_WIDTH / 8, IMAGE_HEIGHT / 8, 1])
         .unwrap()
         .copy_image_to_buffer(CopyImageToBufferInfo::image_buffer(
             out_image.clone(),
@@ -210,7 +226,15 @@ fn main() {
 
     // run setup
     println!("Doing pre-processing pass");
-    execute_buffer(setup_command_buffer.clone(), queue.clone(), device.clone());
+    setup(
+        device.clone(),
+        queue.clone(),
+        in_image.clone(),
+        in_image_view.clone(),
+        memory_allocator.clone(),
+        &descriptor_set_allocator,
+        &command_buffer_allocator,
+    );
 
     // Render loop
     println!("Starting render");
@@ -230,7 +254,9 @@ fn main() {
         {
             // save resulting image
             let buffer_data = out_buff.read().unwrap();
-            let image = ImageBuffer::<Rgba<u8>, _>::from_raw(IMAGE_WIDTH, IMAGE_HEIGHT, &buffer_data[..]).unwrap();
+            let image =
+                ImageBuffer::<Rgba<u8>, _>::from_raw(IMAGE_WIDTH, IMAGE_HEIGHT, &buffer_data[..])
+                    .unwrap();
             image.save(format!("frames/{}.png", frame_i)).unwrap();
 
             // move the sun
