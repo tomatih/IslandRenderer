@@ -10,3 +10,4 @@ vulkano = "0.34.0"
 vulkano-shaders = "0.34.0"
 image = "0.24.8"
 noise = "0.8.2"
+cgmath = { version = "0.18.0", features = ["swizzle"]}

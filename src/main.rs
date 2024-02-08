@@ -9,6 +9,8 @@ use noise::{Fbm, Perlin};
 use std::default::Default;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+use cgmath::Vector3;
+use cgmath::VectorSpace;
 use vulkano::buffer::BufferContents;
 use vulkano::command_buffer::{CopyBufferToImageInfo, CopyImageToBufferInfo};
 use vulkano::device::{Device, Queue};
@@ -129,7 +131,7 @@ fn main() {
 
     // Create buffers
     let mut program_data = ProgramData {
-        sun_pos: [-500.0f32, -500.0f32, 0.0f32],
+        sun_pos: [-1024.0f32, -1024.0f32, 0.0f32],
     };
     let misc_buffer = Buffer::from_data(
         memory_allocator.clone(),
@@ -239,6 +241,8 @@ fn main() {
     // Render loop
     println!("Starting render");
     let frame_count = 10;
+    let sun_start = Vector3::from(program_data.sun_pos);
+    let sun_stop = sun_start + Vector3::new(0.0, 100.0, 5.0f32);
     for frame_i in 0..frame_count {
         print!("Doing frame {} ", frame_i);
 
@@ -260,7 +264,7 @@ fn main() {
             image.save(format!("frames/{}.png", frame_i)).unwrap();
 
             // move the sun
-            program_data.sun_pos[2] += 0.5;
+            program_data.sun_pos = Vector3::lerp(sun_start, sun_stop, frame_i as f32/frame_count as f32).into();
             let mut misc_data = misc_buffer.write().unwrap();
             *misc_data = program_data;
         }
