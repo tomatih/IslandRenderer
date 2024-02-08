@@ -9,9 +9,9 @@ use noise::{Fbm, Perlin};
 use std::default::Default;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-use cgmath::Vector3;
+use cgmath::{Vector3, Zero};
 use cgmath::VectorSpace;
-use vulkano::buffer::BufferContents;
+use vulkano::buffer::{BufferContents, Subbuffer};
 use vulkano::command_buffer::{CopyBufferToImageInfo, CopyImageToBufferInfo};
 use vulkano::device::{Device, Queue};
 use vulkano::format::Format;
@@ -117,6 +117,11 @@ fn setup(
     execute_buffer(setup_command_buffer, queue, device);
 }
 
+fn update_data(data: &ProgramData, buffer: &Subbuffer<ProgramData>){
+    let mut buff_writer = buffer.write().unwrap();
+    *buff_writer = *data;
+}
+
 fn main() {
     println!("Setting up vulkan");
     // Initialize vulkan
@@ -131,7 +136,7 @@ fn main() {
 
     // Create buffers
     let mut program_data = ProgramData {
-        sun_pos: [-1024.0f32, -1024.0f32, 0.0f32],
+        sun_pos: Vector3::zero().into(),
     };
     let misc_buffer = Buffer::from_data(
         memory_allocator.clone(),
@@ -238,12 +243,17 @@ fn main() {
         &command_buffer_allocator,
     );
 
-    // Render loop
+    // Render data
     println!("Starting render");
-    let frame_count = 10;
-    let sun_start = Vector3::from(program_data.sun_pos);
-    let sun_stop = sun_start + Vector3::new(0.0, 100.0, 5.0f32);
-    for frame_i in 0..frame_count {
+    let frame_count = 30;
+    let sun_start = Vector3::new(-1024.0f32, -1024.0f32, 0.0f32);
+    let sun_apex = Vector3::new(-1024.0f32, 0.0f32, 5.0f32);
+    let sun_stop = Vector3::new(-1024.0f32, 1024.0f32, 0.0f32);
+
+    // render loop
+    program_data.sun_pos = sun_start.into();
+    update_data(&program_data, &misc_buffer);
+    for frame_i in 0..=frame_count {
         print!("Doing frame {} ", frame_i);
 
         let start = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
@@ -264,9 +274,15 @@ fn main() {
             image.save(format!("frames/{}.png", frame_i)).unwrap();
 
             // move the sun
-            program_data.sun_pos = Vector3::lerp(sun_start, sun_stop, frame_i as f32/frame_count as f32).into();
-            let mut misc_data = misc_buffer.write().unwrap();
-            *misc_data = program_data;
+            let mut amount = frame_i as f32/frame_count as f32 * 2.0;
+            program_data.sun_pos = if frame_i < frame_count/2 {
+                Vector3::lerp(sun_start, sun_apex, amount)
+            }else {
+                amount-=1.0;
+                Vector3::lerp(sun_apex, sun_stop, amount)
+            }.into();
+
+            update_data(&program_data, &misc_buffer);
         }
     }
 
