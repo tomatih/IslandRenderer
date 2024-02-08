@@ -1,0 +1,77 @@
+#version 460
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+uniform layout(set = 0, binding = 0, rgba8)  writeonly image2D out_img;
+uniform layout(set = 0, binding = 1, r8) readonly image2D in_img;
+layout(set=0, binding=2) buffer Data{
+    vec3 sun_pos;
+};
+
+// sink everything to the edges
+float distance_scale(uint pos){
+    float x = float(pos);
+    return x/256.0*(1.0 - x/1024);
+}
+
+// add colour banding
+vec3 colourise(float height){
+    // ocean
+    if(height < 0.4){
+        return vec3(0.075,0.231,0.749);
+    }
+    // beatches
+    if(height < 0.45){
+        return vec3(0.878,0.824,0.051);
+    }
+    // plains
+    if(height < 0.6){
+        return vec3(0.059,0.82,0.259);
+    }
+    // forests
+    if(height < 0.8){
+        return vec3(0.02,0.271,0.051);
+    }
+    // rocks
+    return vec3(0.588,0.588,0.588);
+}
+
+vec3 tex_to_world(ivec2 tex_pos, float height){
+    return vec3(vec2(tex_pos - imageSize(in_img)/2), height);
+}
+
+ivec2 world_to_tex(vec3 pos){
+    return ivec2(pos.xy + imageSize(in_img)/2);
+}
+
+void main() {
+    // get noise data
+    ivec2 tex_pos = ivec2(gl_GlobalInvocationID.xy);
+    float val = imageLoad(in_img, tex_pos).x;
+
+    // add central focus
+    //val = val*distance_scale(gl_GlobalInvocationID.x) *distance_scale(gl_GlobalInvocationID.y);
+
+    // colourise
+    vec3 color = colourise(val);
+
+    // shade
+    vec3 pos = tex_to_world(tex_pos, val);
+    vec3 ray_dir = normalize(sun_pos - pos);
+    vec3 check_pos = pos;
+    //search
+    for (int i = 0; i < distance(sun_pos, pos); i++) {
+        check_pos += ray_dir;
+        float h = imageLoad(in_img, world_to_tex(check_pos)).x;
+        if(h>check_pos.z){
+            color = mix(color,vec3(0.0),0.5);
+            break;
+        }
+    }
+
+
+
+    // write to texture
+    vec4 to_write = vec4(color, 1.0);
+    imageStore(out_img, tex_pos, to_write);
+}

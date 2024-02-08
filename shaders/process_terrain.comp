@@ -1,0 +1,18 @@
+#version 460
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+uniform layout(set = 0, binding = 0, r8) image2D noise;
+
+// sink everything to the edges
+float distance_scale(uint pos){
+    float x = float(pos);
+    return x/256.0*(1.0 - x/1024);
+}
+
+void main() {
+    ivec2 tex_pos = ivec2(gl_GlobalInvocationID.xy);
+    float height = imageLoad(noise,tex_pos).x;
+    height *= distance_scale(tex_pos.x) * distance_scale(tex_pos.y);
+    imageStore(noise, tex_pos, vec4(height,vec3(0.0)));
+}
