@@ -1,5 +1,5 @@
 mod colour_shader;
-mod proces_shader;
+mod process_shader;
 mod vulkan_helper;
 
 use crate::vulkan_helper::{execute_buffer, get_vulkan_device, make_compute_pipeline, make_image};
@@ -25,6 +25,7 @@ use vulkano::{
 };
 
 fn main() {
+    println!("Setting up vulkan");
     // Initialize vulkan
     let (device, queue) = get_vulkan_device();
 
@@ -32,7 +33,7 @@ fn main() {
     let render_shader = colour_shader::load(device.clone()).unwrap();
     let render_pipeline = make_compute_pipeline(render_shader, device.clone());
 
-    let setup_shader = proces_shader::load(device.clone()).unwrap();
+    let setup_shader = process_shader::load(device.clone()).unwrap();
     let setup_pipeline = make_compute_pipeline(setup_shader, device.clone());
 
     // Prepare memory
@@ -195,6 +196,7 @@ fn main() {
     let render_command_buffer = builder.build().unwrap();
 
     // run setup
+    println!("Doing pre-processing pass");
     execute_buffer(setup_command_buffer.clone(), queue.clone(), device.clone());
 
     // Render loop
