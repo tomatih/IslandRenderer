@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 vulkano = "0.34.0"
 vulkano-shaders = "0.34.0"
-image = "0.24.8"
 noise = "0.8.2"
 cgmath = { version = "0.18.0", features = ["swizzle"]}
+video-rs = {version = "0.7.1", features = ["ndarray"]}
+ndarray = "0.15.6"
