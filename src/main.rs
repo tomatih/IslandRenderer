@@ -1,21 +1,14 @@
-mod colour_shader;
-mod process_shader;
-mod vulkan_helper;
-
-use crate::vulkan_helper::{execute_buffer, get_vulkan_device, make_compute_pipeline, make_image};
-use image::{ImageBuffer, Rgba};
-use noise::utils::{NoiseMapBuilder, PlaneMapBuilder};
-use noise::{Fbm, Perlin};
 use std::default::Default;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+
 use cgmath::{Vector3, Zero};
 use cgmath::VectorSpace;
-use vulkano::buffer::{BufferContents, Subbuffer};
-use vulkano::command_buffer::{CopyBufferToImageInfo, CopyImageToBufferInfo};
-use vulkano::device::{Device, Queue};
-use vulkano::format::Format;
-use vulkano::image::{view::ImageView, Image, ImageUsage};
+use noise::{Fbm, Perlin};
+use noise::utils::{NoiseMapBuilder, PlaneMapBuilder};
+use video_rs::{Encoder, Time};
+use video_rs::encode::Settings;
 use vulkano::{
     buffer::{Buffer, BufferCreateInfo, BufferUsage},
     command_buffer::{
@@ -27,6 +20,17 @@ use vulkano::{
     memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator},
     pipeline::{Pipeline, PipelineBindPoint},
 };
+use vulkano::buffer::{BufferContents, Subbuffer};
+use vulkano::command_buffer::{CopyBufferToImageInfo, CopyImageToBufferInfo};
+use vulkano::device::{Device, Queue};
+use vulkano::format::Format;
+use vulkano::image::{Image, ImageUsage, view::ImageView};
+
+use crate::vulkan_helper::{execute_buffer, get_vulkan_device, make_compute_pipeline, make_image};
+
+mod colour_shader;
+mod process_shader;
+mod vulkan_helper;
 
 #[repr(C)]
 #[derive(Clone, Copy, BufferContents)]
@@ -250,6 +254,13 @@ fn main() {
     let sun_apex = Vector3::new(-1024.0f32, 0.0f32, 5.0f32);
     let sun_stop = Vector3::new(-1024.0f32, 1024.0f32, 0.0f32);
 
+    // video encoder
+    video_rs::init().unwrap();
+    let video_settings = Settings::preset_h264_yuv420p(IMAGE_WIDTH as usize, IMAGE_HEIGHT as usize, false);
+    let mut encoder = Encoder::new(Path::new("out.mp4"), video_settings).expect("Field to create video encoder");
+    let frame_duration = Time::from_nth_of_a_second(15);
+    let mut frame_position = Time::zero();
+
     // render loop
     program_data.sun_pos = sun_start.into();
     update_data(&program_data, &misc_buffer);
@@ -266,12 +277,14 @@ fn main() {
 
         // modify buffers
         {
-            // save resulting image
+            // save resulting frame
             let buffer_data = out_buff.read().unwrap();
-            let image =
-                ImageBuffer::<Rgba<u8>, _>::from_raw(IMAGE_WIDTH, IMAGE_HEIGHT, &buffer_data[..])
-                    .unwrap();
-            image.save(format!("frames/{}.png", frame_i)).unwrap();
+            let frame = ndarray::Array3::from_shape_fn(
+                (IMAGE_HEIGHT as usize, IMAGE_WIDTH as usize, 3usize),
+                |(y,x,c)| buffer_data[(y*IMAGE_WIDTH as usize+x)*4+c]  // RGBA -> RGB
+            );
+            encoder.encode(&frame, &frame_position).expect("Failed encoding a frame");
+            frame_position = frame_position.aligned_with(&frame_duration).add();
 
             // move the sun
             let mut amount = frame_i as f32/frame_count as f32 * 2.0;
@@ -285,6 +298,8 @@ fn main() {
             update_data(&program_data, &misc_buffer);
         }
     }
+
+    encoder.finish().expect("failed to finish encoder");
 
     println!("Success");
 }
