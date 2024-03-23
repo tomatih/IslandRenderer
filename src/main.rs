@@ -73,7 +73,7 @@ fn setup(
         },
         noise_map.iter().map(|x| ((x + 1.0) * 0.5 * 255.0) as u8),
     )
-    .unwrap();
+        .unwrap();
 
     //setup pipeline
     let setup_shader = process_shader::load(device.clone()).unwrap();
@@ -87,7 +87,7 @@ fn setup(
         [WriteDescriptorSet::image_view(0, noise_image_view.clone())],
         [],
     )
-    .unwrap();
+        .unwrap();
 
     // make command buffer
     let mut setup_builder = AutoCommandBufferBuilder::primary(
@@ -95,7 +95,7 @@ fn setup(
         queue.queue_family_index(),
         CommandBufferUsage::OneTimeSubmit,
     )
-    .unwrap();
+        .unwrap();
 
     setup_builder
         .bind_pipeline_compute(setup_pipeline.clone())
@@ -121,7 +121,7 @@ fn setup(
     execute_buffer(setup_command_buffer, queue, device);
 }
 
-fn update_data(data: &ProgramData, buffer: &Subbuffer<ProgramData>){
+fn update_data(data: &ProgramData, buffer: &Subbuffer<ProgramData>) {
     let mut buff_writer = buffer.write().unwrap();
     *buff_writer = *data;
 }
@@ -155,7 +155,7 @@ fn main() {
         },
         program_data,
     )
-    .unwrap();
+        .unwrap();
 
     let out_buff = Buffer::from_iter(
         memory_allocator.clone(),
@@ -170,7 +170,7 @@ fn main() {
         },
         (0..IMAGE_WIDTH * IMAGE_HEIGHT * 4).map(|_| 0u8),
     )
-    .expect("failed to create output buffer");
+        .expect("failed to create output buffer");
 
     // Create GPU images
     let in_image = make_image(
@@ -205,7 +205,7 @@ fn main() {
         ],
         [],
     )
-    .unwrap();
+        .unwrap();
 
     // In order to execute our operation, we have to build a command buffer.
     let mut builder = AutoCommandBufferBuilder::primary(
@@ -213,7 +213,7 @@ fn main() {
         queue.queue_family_index(),
         CommandBufferUsage::MultipleSubmit,
     )
-    .unwrap();
+        .unwrap();
     builder
         .bind_pipeline_compute(render_pipeline.clone())
         .unwrap()
@@ -249,7 +249,7 @@ fn main() {
 
     // Render data
     println!("Starting render");
-    let frame_count = 30;
+    let frame_count = 60 * 5;
     let sun_start = Vector3::new(-1024.0f32, -1024.0f32, 0.0f32);
     let sun_apex = Vector3::new(-1024.0f32, 0.0f32, 5.0f32);
     let sun_stop = Vector3::new(-1024.0f32, 1024.0f32, 0.0f32);
@@ -258,7 +258,7 @@ fn main() {
     video_rs::init().unwrap();
     let video_settings = Settings::preset_h264_yuv420p(IMAGE_WIDTH as usize, IMAGE_HEIGHT as usize, false);
     let mut encoder = Encoder::new(Path::new("out.mp4"), video_settings).expect("Field to create video encoder");
-    let frame_duration = Time::from_nth_of_a_second(15);
+    let frame_duration = Time::from_nth_of_a_second(60);
     let mut frame_position = Time::zero();
 
     // render loop
@@ -281,17 +281,17 @@ fn main() {
             let buffer_data = out_buff.read().unwrap();
             let frame = ndarray::Array3::from_shape_fn(
                 (IMAGE_HEIGHT as usize, IMAGE_WIDTH as usize, 3usize),
-                |(y,x,c)| buffer_data[(y*IMAGE_WIDTH as usize+x)*4+c]  // RGBA -> RGB
+                |(y, x, c)| buffer_data[(y * IMAGE_WIDTH as usize + x) * 4 + c],  // RGBA -> RGB
             );
             encoder.encode(&frame, &frame_position).expect("Failed encoding a frame");
             frame_position = frame_position.aligned_with(&frame_duration).add();
 
             // move the sun
-            let mut amount = frame_i as f32/frame_count as f32 * 2.0;
-            program_data.sun_pos = if frame_i < frame_count/2 {
+            let mut amount = frame_i as f32 / frame_count as f32 * 2.0;
+            program_data.sun_pos = if frame_i < frame_count / 2 {
                 Vector3::lerp(sun_start, sun_apex, amount)
-            }else {
-                amount-=1.0;
+            } else {
+                amount -= 1.0;
                 Vector3::lerp(sun_apex, sun_stop, amount)
             }.into();
 
